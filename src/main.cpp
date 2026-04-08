@@ -56,6 +56,35 @@ static float pendingVolume = -1.0f;
 static uint32_t lastVolSendMs = 0;
 static constexpr uint32_t VOL_SEND_INTERVAL_MS = 150;
 
+// ── LED control (active-low: LOW = on, HIGH = off) ─────────────────────────
+#define LED_ON  LOW
+#define LED_OFF HIGH
+
+// Pulse via hardware timer ISR so it blinks during blocking calls
+static hw_timer_t* ledTimer = nullptr;
+static volatile bool ledTimerState = false;
+
+static void IRAM_ATTR onLedTimer() {
+  ledTimerState = !ledTimerState;
+  digitalWrite(PIN_LED, ledTimerState ? LED_ON : LED_OFF);
+}
+
+static void ledPulseStart() {
+  if (!ledTimer) {
+    ledTimer = timerBegin(0, 80, true); // 1 MHz tick (80 MHz / 80)
+    timerAttachInterrupt(ledTimer, &onLedTimer, true);
+  }
+  timerAlarmWrite(ledTimer, 250000, true); // 250 ms = 2 Hz blink
+  timerAlarmEnable(ledTimer);
+}
+
+static void ledPulseStop() {
+  if (ledTimer) {
+    timerAlarmDisable(ledTimer);
+  }
+  digitalWrite(PIN_LED, cast.isConnected() ? LED_ON : LED_OFF);
+}
+
 // ── Inactivity timers ────────────────────────────────────────────────────────
 static uint32_t lastActivityMs = 0;
 static bool displayOn = true;
@@ -145,7 +174,9 @@ static void menuDoScan() {
   menu.showScanning();
   display.drawMenu(menu); // show "Scanning..." immediately
 
+  ledPulseStart();
   cast.discoverAll(5000);
+  ledPulseStop();
   showDeviceListMenu();
 }
 
@@ -162,6 +193,7 @@ static void menuDoConnect(int idx) {
 
   // Pass the discovered port (e.g., 32234 for groups) instead of defaulting to
   // 8009
+  ledPulseStart();
   if (cast.connect(cast.devices[idx].ip, cast.devices[idx].port)) {
     cast.setFriendlyName(cast.devices[idx].name);
     config.saveLastDevice(cast.devices[idx].ip, cast.devices[idx].name,
@@ -172,6 +204,7 @@ static void menuDoConnect(int idx) {
     display.showOverlay("Failed", cast.devices[idx].name);
     dbgLog.log("[Menu] Failed to connect to %s\n", cast.devices[idx].name);
   }
+  ledPulseStop();
   menu.close();
 }
 
@@ -241,7 +274,7 @@ static void handleMenuInput() {
       snprintf(ssidRow, sizeof(ssidRow), "SSID: %s", WiFi.SSID().c_str());
       snprintf(devRow, sizeof(devRow), "Dev: %s", cast.getFriendlyName());
       snprintf(appRow, sizeof(appRow), "App: %s", cast.getAppName());
-      snprintf(verRow, sizeof(verRow), "Ver: 1.0.6");
+      snprintf(verRow, sizeof(verRow), "Ver: 1.1.0");
 
       const char *rows[] = {ipRow, ssidRow, devRow, appRow, verRow};
       menu.showInfo(rows, 5);
@@ -250,7 +283,7 @@ static void handleMenuInput() {
       display.showOverlay("Disconnected");
       menu.open(false, cast.deviceCount > 0);
     } else if (strcmp(sel, "About") == 0) {
-      const char *rows[] = {"KnobCast", "Firmware v1.0.6",
+      const char *rows[] = {"KnobCast", "Firmware v1.1.0",
                             "by Erico Mendonca",
                             "github.com/doccaz/knobcast"
                             "Built: " __DATE__,
@@ -430,7 +463,7 @@ static void handleMenuInput() {
       snprintf(ssidRow, sizeof(ssidRow), "SSID: %s", WiFi.SSID().c_str());
       snprintf(devRow, sizeof(devRow), "Dev: %s", cast.getFriendlyName());
       snprintf(appRow, sizeof(appRow), "App: %s", cast.getAppName());
-      snprintf(verRow, sizeof(verRow), "Ver: 1.0.6");
+      snprintf(verRow, sizeof(verRow), "Ver: 1.1.0");
       const char *rows[] = {ipRow, ssidRow, devRow, appRow, verRow};
       menu.showInfo(rows, 5);
     } else if (strcmp(sel, "<- back") == 0) {
@@ -546,7 +579,7 @@ void setup() {
   dbgLog.log("\n=== KnobCast ===\n");
 
   pinMode(PIN_LED, OUTPUT);
-  digitalWrite(PIN_LED, LOW);
+  digitalWrite(PIN_LED, LED_OFF);
   pinMode(PIN_BTN, INPUT_PULLUP);
 
   config.begin();
@@ -620,7 +653,9 @@ void loop() {
     if (millis() - stateEnteredMs > 1500) {
       if (config.cfg.scanOnBoot) {
         display.showConnecting("Scanning...");
+        ledPulseStart();
         cast.discoverAll(5000);
+        ledPulseStop();
         dbgLog.log("[App] Boot scan found %d device(s)\n", cast.deviceCount);
       }
 
@@ -639,12 +674,14 @@ void loop() {
                      config.cfg.lastDeviceName, config.cfg.lastDeviceIp,
                      config.cfg.lastDevicePort);
           display.showConnecting(config.cfg.lastDeviceName);
+          ledPulseStart();
           if (cast.connect(config.cfg.lastDeviceIp, config.cfg.lastDevicePort)) {
             cast.setFriendlyName(config.cfg.lastDeviceName);
             dbgLog.log("[App] Auto-connected to %s\n", config.cfg.lastDeviceName);
           } else {
             dbgLog.log("[App] Auto-connect failed\n");
           }
+          ledPulseStop();
         } else {
           dbgLog.log("[App] Last device %s not found in scan\n",
                      config.cfg.lastDeviceName);
@@ -702,7 +739,7 @@ void loop() {
     }
 
     updateDisplay();
-    digitalWrite(PIN_LED, cast.isConnected() ? HIGH : LOW);
+    digitalWrite(PIN_LED, cast.isConnected() ? LED_ON : LED_OFF);
     break;
   }
 }

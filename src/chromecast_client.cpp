@@ -204,8 +204,7 @@ bool ChromecastClient::connect(const char *host, uint16_t port) {
     strncpy(_host, host, sizeof(_host) - 1);
     _host[sizeof(_host) - 1] = '\0';
   }
-  if (port != CAST_PORT)
-    _port = port;
+  _port = port;
 
   _tls.setInsecure();
   dbgLog.log("[Cast] Connecting to %s:%u …\n", _host, _port);
@@ -252,6 +251,7 @@ void ChromecastClient::disconnect() {
   _mediaConnected = false;
   _mediaSessionId = -1;
   _host[0] = '\0';
+  _port = CAST_PORT;
   _sessionId[0] = '\0';
   _appName[0] = '\0';
   _friendlyName[0] = '\0';

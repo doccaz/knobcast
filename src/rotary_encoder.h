@@ -33,7 +33,6 @@ enum class EncEvent : uint8_t {
 
 class RotaryEncoder {
 public:
-    static constexpr uint32_t DEBOUNCE_MS     = 5;
     static constexpr uint32_t LONG_PRESS_MS   = 800;
     // Acceleration: if steps arrive faster than this, multiply them
     static constexpr uint32_t ACCEL_WINDOW_MS = 60;  // ms between steps
@@ -44,15 +43,19 @@ public:
         pinMode(PIN_ENC_DT,  INPUT_PULLUP);
         pinMode(PIN_ENC_SW,  INPUT_PULLUP);
 
-        _lastClk    = digitalRead(PIN_ENC_CLK);
         _lastSw     = HIGH;
         _swDownMs   = 0;
         _pending    = EncEvent::NONE;
         _pendingDelta = 0;
         _lastStepMs = 0;
 
+        // Initialize quadrature state
+        _quadState = (digitalRead(PIN_ENC_CLK) << 1) | digitalRead(PIN_ENC_DT);
+
         attachInterruptArg(digitalPinToInterrupt(PIN_ENC_CLK),
-                           _isrClk, this, CHANGE);
+                           _isrQuad, this, CHANGE);
+        attachInterruptArg(digitalPinToInterrupt(PIN_ENC_DT),
+                           _isrQuad, this, CHANGE);
     }
 
     // Call from loop() – returns pending event (NONE if nothing new).
@@ -98,29 +101,29 @@ public:
     int delta() const { return _pendingDelta; }
 
 private:
-    volatile int _rawDelta  = 0;
-    int          _lastClk;
+    volatile int _rawDelta    = 0;
+    volatile uint8_t _quadState = 0;
     bool         _lastSw;
     uint32_t     _swDownMs;
     EncEvent     _pending;
     int          _pendingDelta;
     uint32_t     _lastStepMs;
 
-    static void IRAM_ATTR _isrClk(void* arg) {
+    static void IRAM_ATTR _isrQuad(void* arg) {
+        // Gray-code quadrature state table.
+        // Index = (oldState << 2) | newState, value = direction (+1, -1, or 0).
+        static const int8_t QEM[16] = {
+        //  new:  00  01  10  11    old:
+                 0, -1, +1,  0,  // 00
+                +1,  0,  0, -1,  // 01
+                -1,  0,  0, +1,  // 10
+                 0, +1, -1,  0,  // 11
+        };
         RotaryEncoder* self = (RotaryEncoder*)arg;
-        uint32_t now = micros();
-        static uint32_t lastUs = 0;
-        if (now - lastUs < 2000) return;  // debounce 2 ms
-        lastUs = now;
-
-        int clk = digitalRead(PIN_ENC_CLK);
-        int dt  = digitalRead(PIN_ENC_DT);
-        if (clk != self->_lastClk) {
-            self->_lastClk = clk;
-            if (clk == LOW) {
-                // rising edge of CLK; DT tells direction
-                self->_rawDelta += (dt != clk) ? +1 : -1;
-            }
-        }
+        uint8_t newState = (digitalRead(PIN_ENC_CLK) << 1) | digitalRead(PIN_ENC_DT);
+        uint8_t idx = (self->_quadState << 2) | newState;
+        int8_t dir = QEM[idx];
+        self->_quadState = newState;
+        if (dir) self->_rawDelta += dir;
     }
 };

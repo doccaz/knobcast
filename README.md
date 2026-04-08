@@ -31,6 +31,11 @@ network.
 - **AP mode** captive portal for first-time WiFi setup (no hardcoded credentials)
 - **Persistent config** stored in NVS (survives reboots and reflashes)
 - **Auto-reconnect** on connection drop or app change
+- **Auto-connect** to last known device on boot (configurable)
+- **Scan on boot** — automatic mDNS discovery at startup (configurable)
+- **Progress bar modes** — show volume level or elapsed playback time
+- **LED status** — solid when connected, pulsing during scan/connect, off when idle
+- **mDNS registration** — device accessible at `knobcast.local`
 
 ---
 
@@ -41,7 +46,7 @@ network.
 | MCU | ESP32-C3 dev board (RISC-V, WiFi) |
 | Encoder | KY-040 rotary encoder with push-button |
 | Display | 72×40 SSD1306 OLED (I2C, addr 0x3C) — onboard |
-| LED | Onboard LED (GPIO 8) — on when cast is connected |
+| LED | Onboard LED (GPIO 8, active-low) — solid when connected, pulses during scan/connect |
 
 ### Wiring
 
@@ -105,6 +110,9 @@ Main Menu
 ├── Settings
 │   ├── Menu Timeout (5s / 15s / 30s / 60s)
 │   ├── Screen Timeout (30s / 1m / 5m / 10m / Never)
+│   ├── Progress Bar (Volume / Elapsed time)
+│   ├── Scan on boot (on/off)
+│   ├── Auto-connect (on/off)
 │   └── Back
 ├── Reboot
 └── Exit
@@ -206,6 +214,12 @@ Stored in ESP32 NVS namespace `knobcast`:
 | `volStep` | float | 0.02 | Volume step per click (1–20 %) |
 | `menuTimeout` | int | 15 | Menu auto-close timeout in seconds |
 | `screenTimeout` | int | 600 | Display sleep timeout in seconds (0 = never) |
+| `scanOnBoot` | bool | true | Run mDNS scan on startup |
+| `barMode` | int | 0 | Progress bar: 0 = volume, 1 = elapsed time |
+| `autoConnect` | bool | true | Auto-connect to last device on boot |
+| `lastDevIp` | string | "" | Last connected device IP |
+| `lastDevName` | string | "" | Last connected device name |
+| `lastDevPort` | uint16 | 8009 | Last connected device port |
 
 ---
 
@@ -253,7 +267,7 @@ chromecast-esp32/
     ├── display.h               ← OLED display manager (HUD, menu, overlays, timeout)
     ├── menu.h                  ← Menu structure and navigation
     ├── web_server.h            ← Web UI + AP mode captive portal
-    ├── rotary_encoder.h        ← Interrupt-driven KY-040 + debounce + acceleration
+    ├── rotary_encoder.h        ← Interrupt-driven KY-040 + quadrature state machine + acceleration
     ├── chromecast_client.h     ← Cast client public API (passive mode)
     ├── chromecast_client.cpp   ← Cast client implementation (connect, discover, control)
     ├── cast_message.h          ← Hand-rolled protobuf CastMessage encoder/decoder
@@ -267,5 +281,5 @@ chromecast-esp32/
 - Device authentication (`com.google.cast.tp.deviceauth`) is not verified.
 - Some apps (e.g. Spotify) may not expose `mediaSessionId` for media commands —
   volume/mute always works as it's receiver-level.
-- Potential additions: OTA firmware updates, seek via encoder in menu.
+- Potential additions: OTA firmware updates.
 - Also... I'm working on a cool 3D printed case for this remote, so stay tuned!
