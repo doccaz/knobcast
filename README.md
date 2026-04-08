@@ -1,4 +1,7 @@
-# ESP32-C3 Chromecast Physical Remote
+# KnobCast: an ESP32-C3 Chromecast Physical Remote
+
+<img width="624" height="1245" alt="knobcast" src="https://github.com/user-attachments/assets/db3a7a4c-7633-43b8-8b1c-1a881f3a4349" />
+
 
 A PlatformIO project that turns an **ESP32-C3 + KY-040 rotary encoder + 72×40 OLED**
 into a physical volume/playback controller for any Chromecast on your local network.
@@ -175,6 +178,9 @@ or button input wakes it immediately. Options: 30 s, 1 min, 5 min, 10 min, or ne
 ---
 
 ## Web UI
+
+<img width="490" height="985" alt="knobcast-1" src="https://github.com/user-attachments/assets/06a10528-14d2-444d-80e4-68aa65f51d39" />
+<img width="490" height="719" alt="knobcast-2" src="https://github.com/user-attachments/assets/9c1863ee-f1dd-4a55-8228-fe539ba665e2" />
 
 Runs on port 80 in both AP and STA modes.
 
