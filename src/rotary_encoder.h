@@ -1,6 +1,8 @@
 #pragma once
 // rotary_encoder.h
-// Interrupt-driven rotary encoder with push-button, debounce, and acceleration.
+// Interrupt-driven rotary encoder with push-button.
+// Uses full gray-code quadrature state machine with divisor=2
+// (one step per two transitions — one per half-detent).
 //
 // Wiring (KY-040 or equivalent):
 //   CLK (A)  → PIN_ENC_CLK   (with 10k pull-up or internal pull-up)
@@ -33,10 +35,8 @@ enum class EncEvent : uint8_t {
 
 class RotaryEncoder {
 public:
-    static constexpr uint32_t LONG_PRESS_MS   = 800;
-    // Acceleration: if steps arrive faster than this, multiply them
-    static constexpr uint32_t ACCEL_WINDOW_MS = 60;  // ms between steps
-    static constexpr int      ACCEL_FACTOR    = 5;   // jump multiplier
+    static constexpr uint32_t LONG_PRESS_MS = 800;
+    static constexpr int DIVISOR = 2;  // transitions per step
 
     void begin() {
         pinMode(PIN_ENC_CLK, INPUT_PULLUP);
@@ -47,7 +47,6 @@ public:
         _swDownMs   = 0;
         _pending    = EncEvent::NONE;
         _pendingDelta = 0;
-        _lastStepMs = 0;
 
         // Initialize quadrature state
         _quadState = (digitalRead(PIN_ENC_CLK) << 1) | digitalRead(PIN_ENC_DT);
@@ -59,7 +58,7 @@ public:
     }
 
     // Call from loop() – returns pending event (NONE if nothing new).
-    // When CW/CCW is returned, delta() gives the signed step count (with accel).
+    // When CW/CCW is returned, delta() gives the signed step count.
     EncEvent poll() {
         // ── Encoder steps ─────────────────────────────────────────────────
         if (_rawDelta != 0) {
@@ -68,12 +67,17 @@ public:
             _rawDelta = 0;
             interrupts();
 
-            uint32_t now = millis();
-            uint32_t gap = now - _lastStepMs;
-            _lastStepMs  = now;
+            // Reset accumulator on direction change to prevent
+            // old-direction remainder causing wrong-direction steps
+            if ((_accumulator > 0 && delta < 0) || (_accumulator < 0 && delta > 0)) {
+                _accumulator = 0;
+            }
+            _accumulator += delta;
+            int steps = _accumulator / DIVISOR;
+            if (steps == 0) return EncEvent::NONE;
+            _accumulator %= DIVISOR;
 
-            int accel = (gap < ACCEL_WINDOW_MS) ? ACCEL_FACTOR : 1;
-            _pendingDelta = delta * accel;
+            _pendingDelta = steps;
             _pending = (_pendingDelta > 0) ? EncEvent::CW : EncEvent::CCW;
             return _pending;
         }
@@ -97,17 +101,17 @@ public:
         return EncEvent::NONE;
     }
 
-    // Signed step count from last CW/CCW event (includes acceleration)
+    // Signed step count from last CW/CCW event
     int delta() const { return _pendingDelta; }
 
 private:
     volatile int _rawDelta    = 0;
     volatile uint8_t _quadState = 0;
+    int          _accumulator = 0;
     bool         _lastSw;
     uint32_t     _swDownMs;
     EncEvent     _pending;
     int          _pendingDelta;
-    uint32_t     _lastStepMs;
 
     static void IRAM_ATTR _isrQuad(void* arg) {
         // Gray-code quadrature state table.

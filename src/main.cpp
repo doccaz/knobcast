@@ -131,8 +131,17 @@ static void serviceAlways() {
         millis() - lastVolSendMs >= VOL_SEND_INTERVAL_MS) {
       cast.setVolume(pendingVolume);
       dbgLog.log("[Remote] Volume → %.0f%%\n", pendingVolume * 100.0f);
-      pendingVolume = -1.0f;
       lastVolSendMs = millis();
+      // Keep pendingVolume as base for next encoder tick until
+      // Chromecast confirms via RECEIVER_STATUS (syncs cast.getVolume())
+    }
+    // Once Chromecast confirms our volume, clear pending so we
+    // track the authoritative value again
+    if (pendingVolume >= 0.0f) {
+      float confirmed = cast.getVolume();
+      float diff = pendingVolume - confirmed;
+      if (diff < 0) diff = -diff;
+      if (diff < 0.005f) pendingVolume = -1.0f;
     }
   }
 }
@@ -274,7 +283,7 @@ static void handleMenuInput() {
       snprintf(ssidRow, sizeof(ssidRow), "SSID: %s", WiFi.SSID().c_str());
       snprintf(devRow, sizeof(devRow), "Dev: %s", cast.getFriendlyName());
       snprintf(appRow, sizeof(appRow), "App: %s", cast.getAppName());
-      snprintf(verRow, sizeof(verRow), "Ver: 1.1.0");
+      snprintf(verRow, sizeof(verRow), "Ver: 1.2.0");
 
       const char *rows[] = {ipRow, ssidRow, devRow, appRow, verRow};
       menu.showInfo(rows, 5);
@@ -283,7 +292,7 @@ static void handleMenuInput() {
       display.showOverlay("Disconnected");
       menu.open(false, cast.deviceCount > 0);
     } else if (strcmp(sel, "About") == 0) {
-      const char *rows[] = {"KnobCast", "Firmware v1.1.0",
+      const char *rows[] = {"KnobCast", "Firmware v1.2.0",
                             "by Erico Mendonca",
                             "github.com/doccaz/knobcast"
                             "Built: " __DATE__,
@@ -463,7 +472,7 @@ static void handleMenuInput() {
       snprintf(ssidRow, sizeof(ssidRow), "SSID: %s", WiFi.SSID().c_str());
       snprintf(devRow, sizeof(devRow), "Dev: %s", cast.getFriendlyName());
       snprintf(appRow, sizeof(appRow), "App: %s", cast.getAppName());
-      snprintf(verRow, sizeof(verRow), "Ver: 1.1.0");
+      snprintf(verRow, sizeof(verRow), "Ver: 1.2.0");
       const char *rows[] = {ipRow, ssidRow, devRow, appRow, verRow};
       menu.showInfo(rows, 5);
     } else if (strcmp(sel, "<- back") == 0) {
@@ -499,7 +508,8 @@ static void handleHUDInput() {
     if (!cast.isConnected() || !cast.isVolumeSynced())
       break;
     float step = config.cfg.volumeStep * encoder.delta();
-    // Use pending volume as base if we haven't flushed yet
+    // Always use last known target as base — never fall back to
+    // cast.getVolume() which may be stale (async confirmation)
     float base = (pendingVolume >= 0.0f) ? pendingVolume : cast.getVolume();
     float newVol = base + step;
     if (newVol < 0.0f)
@@ -511,7 +521,6 @@ static void handleHUDInput() {
     if (millis() - lastVolSendMs >= VOL_SEND_INTERVAL_MS) {
       cast.setVolume(newVol);
       dbgLog.log("[Remote] Volume → %.0f%%\n", newVol * 100.0f);
-      pendingVolume = -1.0f;
       lastVolSendMs = millis();
     }
     char buf[16];
