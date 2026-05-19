@@ -707,6 +707,18 @@ void loop() {
     // Always run background tasks if connected
     cast.loop();
 
+    // ── Wake-on-input: if screen is blanked, first input wakes display only ─
+    if (!displayOn) {
+      EncEvent ev = encoder.poll();
+      bool back = backButtonPressed();
+      if (ev != EncEvent::NONE || back) {
+        resetActivity();       // turns display back on
+        if (menu.isOpen())
+          menu.close();        // return to HUD after wake
+      }
+      break;                   // skip normal input handling this cycle
+    }
+
     if (menu.isOpen()) {
       handleMenuInput();
 
