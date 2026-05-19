@@ -93,15 +93,18 @@ public:
     }
 
     void showDeviceActions(int deviceIdx, const char* deviceName,
-                           bool isConnected, bool isPlaying = false) {
+                           bool isConnected, bool isPlaying = false,
+                           bool hasApp = true) {
         screen = MenuScreen::DEVICE_ACTIONS;
         selectedDevice = deviceIdx;
         cursor = 0;
         count  = 0;
         if (isConnected) {
-            _setItem(count++, isPlaying ? "Pause" : "Play");
-            _setItem(count++, "Previous");
-            _setItem(count++, "Next");
+            if (hasApp) {
+                _setItem(count++, isPlaying ? "Pause" : "Play");
+                _setItem(count++, "Previous");
+                _setItem(count++, "Next");
+            }
             _setItem(count++, "Connection info");
             _setItem(count++, "Disconnect");
         } else {
@@ -111,10 +114,11 @@ public:
         _setItem(count++, "<- back");
     }
 
-    void updateActionState(const char* deviceName, bool isConnected, bool isPlaying) {
+    void updateActionState(const char* deviceName, bool isConnected,
+                           bool isPlaying, bool hasApp = true) {
         if (screen != MenuScreen::DEVICE_ACTIONS) return;
         int oldCursor = cursor;
-        showDeviceActions(selectedDevice, deviceName, isConnected, isPlaying);
+        showDeviceActions(selectedDevice, deviceName, isConnected, isPlaying, hasApp);
         cursor = oldCursor;
         if (cursor >= count) cursor = count - 1;
     }

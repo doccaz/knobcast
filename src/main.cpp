@@ -264,13 +264,14 @@ static void handleMenuInput() {
       // Pre-flight sync to ensure fresh status
       cast.loop();
       int connIdx = cast.getConnectedDeviceIdx();
+      bool appActive = cast.getAppName()[0] != '\0';
       if (connIdx >= 0) {
         menu.showDeviceActions(connIdx, cast.devices[connIdx].name, true,
-                               cast.isPlaying());
+                               cast.isPlaying(), appActive);
       } else {
         // Fallback if not in discovered list: use current session name
         menu.showDeviceActions(-1, cast.getFriendlyName(), true,
-                               cast.isPlaying());
+                               cast.isPlaying(), appActive);
       }
     } else if (strcmp(sel, "Devices") == 0) {
       showDeviceListMenu();
@@ -433,8 +434,9 @@ static void handleMenuInput() {
         // perfectly
         bool devConnected = isTcpUp && hostMatches;
 
+        bool devHasApp = devConnected && cast.getAppName()[0] != '\0';
         menu.showDeviceActions(devIdx, cast.devices[devIdx].name, devConnected,
-                               devConnected && cast.isPlaying());
+                               devConnected && cast.isPlaying(), devHasApp);
       }
     }
     break;
@@ -743,8 +745,9 @@ void loop() {
         } else if (idx == -1) {
           isConnected = cast.isConnected();
         }
+        bool syncHasApp = isConnected && cast.getAppName()[0] != '\0';
         menu.updateActionState(cast.getFriendlyName(), isConnected,
-                               isConnected && cast.isPlaying());
+                               isConnected && cast.isPlaying(), syncHasApp);
         lastMenuSync = millis();
       }
     } else {
