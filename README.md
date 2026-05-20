@@ -1,7 +1,7 @@
 # KnobCast: an ESP32-C3 Chromecast Physical Remote
 
 
-<img width="715" height="1276" alt="image" src="https://github.com/user-attachments/assets/5e436ff0-1217-4676-bd98-a637571227e7" />
+<img width="526" height="935" alt="image" src="https://github.com/user-attachments/assets/8f3775de-459f-4ab8-9e22-6620a2387502" />
 
 A PlatformIO project that turns an **ESP32-C3 + KY-040 rotary encoder + 72×40 OLED**
 into a physical volume/playback controller for any Chromecast on your local network.
