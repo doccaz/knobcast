@@ -17,6 +17,9 @@
 #include <WiFiClientSecure.h>
 #include <ESPmDNS.h>
 #include <ArduinoJson.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 #include "cast_message.h"
 
 // ── Namespaces ───────────────────────────────────────────────────────────────
@@ -58,7 +61,17 @@ public:
     // ── Connection ─────────────────────────────────────────────────────────
     bool connect(const char* host = nullptr, uint16_t port = CAST_PORT);
     void disconnect();
-    bool isConnected();
+    // Cached by the worker/connect/disconnect, so UI code never touches the socket.
+    bool isConnected() const { return _up; }
+
+    // ── Worker task ────────────────────────────────────────────────────────
+    // Owns the socket: calls loop() and sends requested volume/mute. A slow or
+    // stalled receiver (TLS writes can block for seconds) then never freezes the
+    // UI. Every method that touches the socket takes _mtx.
+    void startTask();
+    // Non-blocking; the latest request wins and is sent by the worker.
+    void requestVolume(float level);
+    void requestMute(bool muted);
 
     // Probe a device: connect, wait for status, return true if an app is active.
     // Disconnects automatically if no active session found.
@@ -102,10 +115,36 @@ public:
     void setFriendlyName(const char* name) {
         strncpy(_friendlyName, name, sizeof(_friendlyName) - 1);
         _friendlyName[sizeof(_friendlyName) - 1] = '\0';
+        strncpy(_wantName, _friendlyName, sizeof(_wantName) - 1);
     }
 
 private:
-    WiFiClientSecure _tls;
+    SemaphoreHandle_t _mtx = nullptr; // recursive; guards _tls and parser state
+    volatile bool     _up = false;
+    volatile bool     _volReqPending = false;
+    volatile float    _volReq = 0;
+    volatile bool     _muteReqPending = false;
+    volatile bool     _muteReq = false;
+    struct Lock {
+        SemaphoreHandle_t m;
+        explicit Lock(SemaphoreHandle_t mtx) : m(mtx) { if (m) xSemaphoreTakeRecursive(m, portMAX_DELAY); }
+        ~Lock() { if (m) xSemaphoreGiveRecursive(m); }
+    };
+    static void taskEntry(void* self);
+
+    // Remembered target for auto-reconnect after an unexpected drop; cleared by disconnect().
+    bool     _wantConn = false;
+    char     _wantHost[64] = {0};
+    uint16_t _wantPort = CAST_PORT;
+    char     _wantName[64] = {0};
+    uint32_t _nextRetryMs = 0;
+
+    // WiFiClientSecure with a settable write timeout: the stock one is the connect
+    // timeout (30 s), and a stalled write holds the socket for that long.
+    struct CastTls : WiFiClientSecure {
+        void setWriteTimeout(unsigned long ms) { if (sslclient) sslclient->socket_timeout = ms; }
+    };
+    CastTls _tls;
     char   _host[64];
     uint16_t _port;
 

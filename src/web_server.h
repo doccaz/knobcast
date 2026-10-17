@@ -373,19 +373,19 @@ window.addEventListener('load',function(){fetch('/status').then(r=>r.json()).the
         else if (cmd == "volup") {
             float v = _cast->getVolume() + _config->cfg.volumeStep;
             if (v > 1.0f) v = 1.0f;
-            ok = _cast->setVolume(v);
+            { _cast->requestVolume(v); ok = true; }
         }
         else if (cmd == "voldown") {
             float v = _cast->getVolume() - _config->cfg.volumeStep;
             if (v < 0.0f) v = 0.0f;
-            ok = _cast->setVolume(v);
+            { _cast->requestVolume(v); ok = true; }
         }
         else if (cmd.startsWith("setvol:")) {
             int pct = cmd.substring(7).toInt();
             float v = pct / 100.0f;
             if (v < 0) v = 0;
             if (v > 1) v = 1;
-            ok = _cast->setVolume(v);
+            { _cast->requestVolume(v); ok = true; }
         }
         else if (cmd.startsWith("seek:")) {
             float pos = cmd.substring(5).toFloat();

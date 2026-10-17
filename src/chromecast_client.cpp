@@ -186,6 +186,7 @@ bool ChromecastClient::discover(uint32_t timeoutMs) {
   int n = discoverAll(timeoutMs);
   if (n == 0)
     return false;
+  Lock lock(_mtx);
   strncpy(_host, devices[0].ip, sizeof(_host) - 1);
   _host[sizeof(_host) - 1] = '\0';
   _port = devices[0].port;
@@ -195,6 +196,7 @@ bool ChromecastClient::discover(uint32_t timeoutMs) {
 // ─── TLS Connection
 // ───────────────────────────────────────────────────────────
 bool ChromecastClient::connect(const char *host, uint16_t port) {
+  Lock lock(_mtx);
   const char *h = host ? host : _host;
   if (h[0] == '\0') {
     dbgLog.log("[Cast] No host – call discover() first or pass IP");
@@ -208,16 +210,26 @@ bool ChromecastClient::connect(const char *host, uint16_t port) {
 
   _tls.setInsecure();
   dbgLog.log("[Cast] Connecting to %s:%u …\n", _host, _port);
-  if (!_tls.connect(_host, _port)) {
+  // The framework waits up to 120 s for a TLS handshake and 30 s for TCP; on a weak
+  // link that freezes the menu for minutes. A healthy speaker answers in ~1-4 s.
+  _tls.setHandshakeTimeout(10);
+  if (!_tls.connect(_host, _port, 10000)) {
     dbgLog.log("[Cast] TLS connect failed");
+    _up = false;
     return false;
   }
+  _tls.setWriteTimeout(10000);
   dbgLog.log("[Cast] TLS connected");
+  strncpy(_wantHost, _host, sizeof(_wantHost) - 1);
+  _wantPort = _port;
+  _wantConn = true;
 
   _mediaConnected = false;
   _volumeSynced = false;
   _sessionId[0] = '\0';
   _appName[0] = '\0';
+
+  _up = true;
 
   // CONNECT on platform channel
   if (!sendConnect(PLATFORM_DEST))
@@ -236,6 +248,11 @@ bool ChromecastClient::connect(const char *host, uint16_t port) {
 }
 
 void ChromecastClient::disconnect() {
+  Lock lock(_mtx);
+  _up = false;
+  _wantConn = false; // deliberate: don't auto-reconnect
+  _volReqPending = false;
+  _muteReqPending = false;
   if (_tls.connected()) {
     JsonDocument doc;
     doc["type"] = "CLOSE";
@@ -261,11 +278,65 @@ void ChromecastClient::disconnect() {
   dbgLog.log("[Cast] Disconnected & state cleared\n");
 }
 
-bool ChromecastClient::isConnected() { return _tls.connected(); }
+void ChromecastClient::startTask() {
+  if (_mtx) return;
+  _mtx = xSemaphoreCreateRecursiveMutex();
+  xTaskCreate(taskEntry, "cast", 12288, this, 1, nullptr);
+}
+
+void ChromecastClient::requestVolume(float level) {
+  _volReq = level;
+  _volReqPending = true;
+}
+
+void ChromecastClient::requestMute(bool muted) {
+  _muted = muted; // optimistic; the receiver's status corrects it
+  _muteReq = muted;
+  _muteReqPending = true;
+}
+
+void ChromecastClient::taskEntry(void *self) {
+  ChromecastClient *c = static_cast<ChromecastClient *>(self);
+  for (;;) {
+    if (!c->_up && c->_wantConn && (int32_t)(millis() - c->_nextRetryMs) >= 0) {
+      dbgLog.log("[Cast] Connection lost, reconnecting to %s\n", c->_wantHost);
+      char host[64], name[64];
+      strncpy(host, c->_wantHost, sizeof(host));
+      strncpy(name, c->_wantName, sizeof(name));
+      uint16_t port = c->_wantPort;
+      {
+        Lock lock(c->_mtx);
+        c->_tls.stop();
+      }
+      if (c->connect(host, port)) {
+        c->setFriendlyName(name);
+      } else {
+        c->_nextRetryMs = millis() + 3000;
+      }
+    }
+    if (c->_up) {
+      uint32_t t0 = millis();
+      c->loop();
+      if (c->_muteReqPending) {
+        c->_muteReqPending = false;
+        c->setMute(c->_muteReq);
+      }
+      if (c->_volReqPending) {
+        c->_volReqPending = false;
+        c->setVolume(c->_volReq);
+      }
+      uint32_t dt = millis() - t0;
+      if (dt > 500)
+        dbgLog.log("[Cast] worker stalled %u ms (socket slow)\n", (unsigned)dt);
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
 
 // ─── Probe: connect, check for active session, disconnect if idle ────────────
 bool ChromecastClient::probeForActiveSession(const char *host, uint16_t port,
                                              uint32_t waitMs) {
+  Lock lock(_mtx);
   if (!connect(host, port))
     return false;
 
@@ -288,8 +359,11 @@ bool ChromecastClient::probeForActiveSession(const char *host, uint16_t port,
 
 // ─── loop() ──────────────────────────────────────────────────────────────────
 void ChromecastClient::loop() {
-  if (!_tls.connected())
+  Lock lock(_mtx);
+  if (!_tls.connected()) {
+    _up = false;
     return;
+  }
 
   uint32_t now = millis();
 
@@ -371,6 +445,7 @@ bool ChromecastClient::ensureMediaConnection() {
 
 // ─── Volume & mute (receiver-level — works with any app) ────────────────────
 bool ChromecastClient::setVolume(float level) {
+  Lock lock(_mtx);
   if (level < 0)
     level = 0;
   if (level > 1)
@@ -385,6 +460,7 @@ bool ChromecastClient::setVolume(float level) {
 }
 
 bool ChromecastClient::setMute(bool muted) {
+  Lock lock(_mtx);
   JsonDocument doc;
   doc["type"] = "SET_VOLUME";
   doc["volume"]["muted"] = muted;
@@ -399,6 +475,7 @@ bool ChromecastClient::setMute(bool muted) {
 // Helper: send a media command, connecting to transport if needed.
 // If mediaSessionId is unknown, re-requests media status and retries once.
 bool ChromecastClient::_sendMediaCmd(const char *type, JsonDocument &doc) {
+  Lock lock(_mtx);
   if (!ensureMediaConnection()) {
     dbgLog.log("[Cast] Media cmd '%s' failed: no transport\n", type);
     return false;

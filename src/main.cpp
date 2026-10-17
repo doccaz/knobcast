@@ -133,11 +133,11 @@ static void serviceAlways() {
     }
   }
   if (cast.isConnected()) {
-    cast.loop();
+    // (cast.loop() runs in the cast worker task)
     // Flush pending throttled volume
     if (pendingVolume >= 0.0f && volDirty &&
         millis() - lastVolSendMs >= VOL_SEND_INTERVAL_MS) {
-      cast.setVolume(pendingVolume);
+      cast.requestVolume(pendingVolume);
       dbgLog.log("[Remote] Volume → %.0f%%\n", pendingVolume * 100.0f);
       lastVolSendMs = millis();
       volDirty = false; // send each change once; resending an unechoed value floods the receiver
@@ -272,8 +272,6 @@ static void handleMenuInput() {
   case MenuScreen::MAIN: {
     const char *sel = menu.selectedLabel();
     if (strcmp(sel, "Actions") == 0) {
-      // Pre-flight sync to ensure fresh status
-      cast.loop();
       int connIdx = cast.getConnectedDeviceIdx();
       bool appActive = cast.getAppName()[0] != '\0';
       if (connIdx >= 0) {
@@ -535,7 +533,7 @@ static void handleHUDInput() {
     // Send immediately if enough time has passed, otherwise defer
     if (millis() - lastVolSendMs >= VOL_SEND_INTERVAL_MS) {
       volDirty = false;
-      cast.setVolume(newVol);
+      cast.requestVolume(newVol);
       dbgLog.log("[Remote] Volume → %.0f%%\n", newVol * 100.0f);
       lastVolSendMs = millis();
     }
@@ -555,7 +553,7 @@ static void handleHUDInput() {
     if (cast.isConnected()) {
       bool newMute = !cast.isMuted();
       dbgLog.log("[Remote] → MUTE %s\n", newMute ? "ON" : "OFF");
-      cast.setMute(newMute);
+      cast.requestMute(newMute);
       display.showOverlay(newMute ? "MUTED" : "UNMUTED");
     }
     break;
@@ -601,6 +599,7 @@ static void updateDisplay() {
 void setup() {
   Serial.begin(115200);
   delay(300);
+  cast.startTask();
   dbgLog.log("\n=== KnobCast ===\n");
   // Why joins fail: 201 = AP not found, 15 = 4-way handshake timeout, 2 = auth expired,
   // 205 = connection fail, 8 = left by us.
@@ -748,9 +747,6 @@ void loop() {
 
   // ── READY: HUD + menu, no auto-connect ───────────────────────────────
   case AppState::READY:
-    // Always run background tasks if connected
-    cast.loop();
-
     // ── Wake-on-input: if screen is blanked, first input wakes display only ─
     if (!displayOn) {
       EncEvent ev = encoder.poll();

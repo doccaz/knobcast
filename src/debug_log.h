@@ -5,6 +5,8 @@
 // It prints to Serial AND stores in the ring buffer.
 
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 static constexpr int LOG_LINES     = 60;
 static constexpr int LOG_LINE_LEN  = 256;
@@ -15,6 +17,9 @@ public:
 
     void log(const char* fmt, ...) __attribute__((format(printf, 2, 3))) {
         if (!fmt) return;
+
+        // Called from the main and cast worker tasks: serialize the shared buffers.
+        Guard guard(_mtx);
 
         // Use static buffers to save ~0.5KB of stack space per call
         static char buf[LOG_LINE_LEN];
@@ -49,6 +54,7 @@ public:
 
     // Build a JSON array of log lines (oldest first)
     String toJson() const {
+        Guard guard(_mtx);
         String json = "[";
         int start = (_count < LOG_LINES) ? 0 : _head;
         for (int i = 0; i < _count; i++) {
@@ -67,9 +73,15 @@ public:
         return json;
     }
 
-    void clear() { _head = 0; _count = 0; }
+    void clear() { Guard guard(_mtx); _head = 0; _count = 0; }
 
 private:
+    struct Guard {
+        SemaphoreHandle_t m;
+        explicit Guard(SemaphoreHandle_t mtx) : m(mtx) { if (m) xSemaphoreTakeRecursive(m, portMAX_DELAY); }
+        ~Guard() { if (m) xSemaphoreGiveRecursive(m); }
+    };
+    SemaphoreHandle_t _mtx = xSemaphoreCreateRecursiveMutex();
     char _lines[LOG_LINES][LOG_LINE_LEN] = {};
     int  _head = 0;
     int  _count = 0;
