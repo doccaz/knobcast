@@ -263,7 +263,7 @@ function doTestWifi(){var s=document.getElementById('ssid').value;var p=document
 function doWifiScan(){var ul=document.getElementById('wifiList');ul.style.display='block';ul.innerHTML='<li>Scanning...</li>';fetch('/wifiscan').then(r=>r.json()).then(j=>{ul.innerHTML='';if(!j.networks||j.networks.length===0){ul.innerHTML='<li>No networks found</li>';return}j.networks.forEach(n=>{var li=document.createElement('li');var lock=n.open?'':'&#x1f512; ';var bars=n.rssi>-50?'&#x2588;&#x2588;&#x2588;':n.rssi>-70?'&#x2588;&#x2588;':'&#x2588;';li.innerHTML=lock+n.ssid+' <small>'+bars+' '+n.rssi+'dBm</small> <button class="btn btn-ctrl" onclick="document.getElementById(\'ssid\').value=\''+n.ssid.replace(/'/g,"\\'")+'\';toast(\'SSID set\')">Use</button>';ul.appendChild(li)})}).catch(()=>{ul.innerHTML='<li>Scan failed</li>'})}
 function doReset(){if(confirm('Factory reset? All settings will be erased.')){fetch('/reset',{method:'POST'}).then(()=>{toast('Reset! Rebooting...');setTimeout(()=>location.reload(),5000)})}}
 setInterval(pollStatus,3000);
-window.addEventListener('load',function(){fetch('/status').then(r=>r.json()).then(j=>{document.getElementById('ssid').value=j.ssid||'';document.getElementById('pass').value=j.wifiPass||'';document.getElementById('castIp').value=j.castIp||'';document.getElementById('volStep').value=Math.round((j.volStep||0.02)*100);if(j.menuTimeout){var ms=document.getElementById('menuTimeout');if(ms)ms.value=j.menuTimeout}if(j.screenTimeout!==undefined){var ss=document.getElementById('screenTimeout');if(ss)ss.value=j.screenTimeout}if(j.barMode!==undefined){document.getElementById('barMode').value=j.barMode}if(j.scanOnBoot!==undefined){document.getElementById('scanOnBoot').checked=j.scanOnBoot}if(j.autoConnect!==undefined){document.getElementById('autoConnect').checked=j.autoConnect}pollStatus()}).catch(e=>console.error('load:',e))});
+window.addEventListener('load',function(){fetch('/status').then(r=>r.json()).then(j=>{document.getElementById('ssid').value=j.ssid||'';document.getElementById('pass').placeholder=j.wifiPassSet?'(saved - leave blank to keep)':'';document.getElementById('castIp').value=j.castIp||'';document.getElementById('volStep').value=Math.round((j.volStep||0.02)*100);if(j.menuTimeout){var ms=document.getElementById('menuTimeout');if(ms)ms.value=j.menuTimeout}if(j.screenTimeout!==undefined){var ss=document.getElementById('screenTimeout');if(ss)ss.value=j.screenTimeout}if(j.barMode!==undefined){document.getElementById('barMode').value=j.barMode}if(j.scanOnBoot!==undefined){document.getElementById('scanOnBoot').checked=j.scanOnBoot}if(j.autoConnect!==undefined){document.getElementById('autoConnect').checked=j.autoConnect}pollStatus()}).catch(e=>console.error('load:',e))});
 </script>
 </body></html>)rawhtml");
         _server.send(200, "text/html", html);
@@ -281,6 +281,11 @@ window.addEventListener('load',function(){fetch('/status').then(r=>r.json()).the
             _server.send(400, "application/json", "{\"ok\":false,\"msg\":\"SSID is required\"}");
             return;
         }
+
+        // The password is never sent to the page, so a blank field with the same SSID
+        // means "keep the saved one".
+        if (pass.length() == 0 && strcmp(_config->cfg.wifiSsid, ssid.c_str()) == 0)
+            pass = _config->cfg.wifiPass;
 
         // Check if WiFi credentials changed — only reboot if so
         bool wifiChanged = (strcmp(_config->cfg.wifiSsid, ssid.c_str()) != 0 ||
@@ -334,7 +339,7 @@ window.addEventListener('load',function(){fetch('/status').then(r=>r.json()).the
         json += ",\"host\":\"" + _jsonEsc(_cast->getHost()) + "\"";
         json += ",\"ssid\":\"" + _jsonEsc(_config->cfg.wifiSsid) + "\"";
         json += ",\"castIp\":\"" + _jsonEsc(_config->cfg.castIp) + "\"";
-        json += ",\"wifiPass\":\"" + _jsonEsc(_config->cfg.wifiPass) + "\"";
+        json += ",\"wifiPassSet\":" + String(_config->cfg.wifiPass[0] ? "true" : "false");
         json += ",\"volStep\":" + String(_config->cfg.volumeStep, 2);
         json += ",\"menuTimeout\":" + String(_config->cfg.menuTimeout);
         json += ",\"screenTimeout\":" + String(_config->cfg.screenTimeout);
@@ -443,6 +448,8 @@ window.addEventListener('load',function(){fetch('/status').then(r=>r.json()).the
             _server.send(200, "application/json", "{\"ok\":false,\"msg\":\"SSID empty\"}");
             return;
         }
+        if (pass.length() == 0 && strcmp(_config->cfg.wifiSsid, ssid.c_str()) == 0)
+            pass = _config->cfg.wifiPass; // blank = keep the saved password
 
         // If we're in AP mode, briefly switch to STA+AP to test
         wifi_mode_t prevMode = WiFi.getMode();
