@@ -54,7 +54,11 @@ static int infoScrollPos = 0;
 // ── Volume throttle ─────────────────────────────────────────────────────────
 static float pendingVolume = -1.0f;
 static uint32_t lastVolSendMs = 0;
-static constexpr uint32_t VOL_SEND_INTERVAL_MS = 150;
+static constexpr uint32_t VOL_SEND_INTERVAL_MS = 400; // an old Chromecast Audio stalls when flooded faster
+static constexpr uint32_t VOL_CONFIRM_TIMEOUT_MS = 1500;
+static constexpr uint32_t VOL_IDLE_RESYNC_MS = 1000; // knob still this long -> trust the receiver again
+static uint32_t lastVolTurnMs = 0;
+static bool volDirty = false; // pendingVolume changed since it was last sent
 
 // ── LED control (active-low: LOW = on, HIGH = off) ─────────────────────────
 #define LED_ON  LOW
@@ -131,21 +135,24 @@ static void serviceAlways() {
   if (cast.isConnected()) {
     cast.loop();
     // Flush pending throttled volume
-    if (pendingVolume >= 0.0f &&
+    if (pendingVolume >= 0.0f && volDirty &&
         millis() - lastVolSendMs >= VOL_SEND_INTERVAL_MS) {
       cast.setVolume(pendingVolume);
       dbgLog.log("[Remote] Volume → %.0f%%\n", pendingVolume * 100.0f);
       lastVolSendMs = millis();
+      volDirty = false; // send each change once; resending an unechoed value floods the receiver
       // Keep pendingVolume as base for next encoder tick until
       // Chromecast confirms via RECEIVER_STATUS (syncs cast.getVolume())
     }
     // Once Chromecast confirms our volume, clear pending so we
     // track the authoritative value again
-    if (pendingVolume >= 0.0f) {
+    if (pendingVolume >= 0.0f && millis() - lastVolTurnMs > VOL_IDLE_RESYNC_MS) {
       float confirmed = cast.getVolume();
       float diff = pendingVolume - confirmed;
       if (diff < 0) diff = -diff;
       if (diff < 0.005f) pendingVolume = -1.0f;
+      // Receiver rounded it or never echoed it: stop trusting our own target.
+      else if (!volDirty && millis() - lastVolSendMs > VOL_CONFIRM_TIMEOUT_MS) pendingVolume = -1.0f;
     }
   }
 }
@@ -523,8 +530,11 @@ static void handleHUDInput() {
     if (newVol > 1.0f)
       newVol = 1.0f;
     pendingVolume = newVol;
+    volDirty = true;
+    lastVolTurnMs = millis();
     // Send immediately if enough time has passed, otherwise defer
     if (millis() - lastVolSendMs >= VOL_SEND_INTERVAL_MS) {
+      volDirty = false;
       cast.setVolume(newVol);
       dbgLog.log("[Remote] Volume → %.0f%%\n", newVol * 100.0f);
       lastVolSendMs = millis();
@@ -592,6 +602,12 @@ void setup() {
   Serial.begin(115200);
   delay(300);
   dbgLog.log("\n=== KnobCast ===\n");
+  // Why joins fail: 201 = AP not found, 15 = 4-way handshake timeout, 2 = auth expired,
+  // 205 = connection fail, 8 = left by us.
+  WiFi.onEvent([](arduino_event_id_t, arduino_event_info_t info) {
+    dbgLog.log("[WiFi] disconnected, reason %u, rssi %d\n",
+               info.wifi_sta_disconnected.reason, info.wifi_sta_disconnected.rssi);
+  }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
   pinMode(PIN_LED, OUTPUT);
   digitalWrite(PIN_LED, LED_OFF);
@@ -647,6 +663,10 @@ void loop() {
       // interval (measured on a sibling ESP32-C3 project: 47% ping loss, 1-10 s
       // latency). Powered over USB, so keep the radio on.
       WiFi.setSleep(false);
+      // Mesh with one SSID on several nodes: the default fast scan joins the first
+      // AP found, not the strongest. Scan everything and take the best signal.
+      WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+      WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
       WiFi.begin(config.cfg.wifiSsid, config.cfg.wifiPass);
       wifiBegun = true;
       stateEnteredMs = millis();
