@@ -117,6 +117,10 @@ static bool backButtonPressed() {
 }
 
 // ── Always-run services ──────────────────────────────────────────────────────
+static constexpr unsigned long WIFI_ATTEMPT_TIMEOUT_MS = 15000;
+static constexpr uint8_t       WIFI_CONNECT_ATTEMPTS   = 3;
+static constexpr unsigned long WIFI_AP_RETRY_MS        = 120000;
+
 static void serviceAlways() {
   if (webServerStarted) {
     webServer.loop();
@@ -616,6 +620,12 @@ void loop() {
     break;
 
   case AppState::AP_MODE:
+    // A flaky first join shouldn't strand the device in AP mode until a human
+    // resets it: if a network is saved and nobody is using the AP, reboot and retry.
+    if (webServerStarted && config.cfg.configured && config.cfg.wifiSsid[0] != '\0' &&
+        millis() - stateEnteredMs > WIFI_AP_RETRY_MS && WiFi.softAPgetStationNum() == 0) {
+      ESP.restart();
+    }
     if (!webServerStarted) {
       webServer.startAP();
       webServer.begin(&config, &cast);
@@ -628,23 +638,35 @@ void loop() {
 
   case AppState::WIFI_CONNECTING: {
     static bool wifiBegun = false;
+    static uint8_t wifiAttempt = 0;
     if (!wifiBegun) {
-      dbgLog.log("[WiFi] Connecting to %s …\n", config.cfg.wifiSsid);
+      dbgLog.log("[WiFi] Connecting to %s (attempt %u)…\n", config.cfg.wifiSsid, wifiAttempt + 1);
       display.showConnecting(config.cfg.wifiSsid);
       WiFi.mode(WIFI_STA);
+      // Modem sleep buffers inbound traffic until the router's next wake
+      // interval (measured on a sibling ESP32-C3 project: 47% ping loss, 1-10 s
+      // latency). Powered over USB, so keep the radio on.
+      WiFi.setSleep(false);
       WiFi.begin(config.cfg.wifiSsid, config.cfg.wifiPass);
       wifiBegun = true;
       stateEnteredMs = millis();
     }
     if (WiFi.status() == WL_CONNECTED) {
       wifiBegun = false;
+      wifiAttempt = 0;
       dbgLog.log("\n[WiFi] Connected – IP: %s\n",
                  WiFi.localIP().toString().c_str());
       display.showSplash(WiFi.localIP().toString().c_str());
       state = AppState::WIFI_CONNECTED;
       stateEnteredMs = millis();
-    } else if (millis() - stateEnteredMs > 20000) {
+    } else if (millis() - stateEnteredMs > WIFI_ATTEMPT_TIMEOUT_MS) {
       wifiBegun = false;
+      if (++wifiAttempt < WIFI_CONNECT_ATTEMPTS) {
+        // Often a failed first association (e.g. 4-way handshake timeout); a fresh one works.
+        WiFi.disconnect(false, false);
+        break;
+      }
+      wifiAttempt = 0;
       dbgLog.log("[WiFi] Timeout — falling back to AP mode");
       display.showOverlay("WiFi fail", "AP mode...");
       state = AppState::AP_MODE;
