@@ -293,7 +293,7 @@ static void handleMenuInput() {
       snprintf(ssidRow, sizeof(ssidRow), "SSID: %s", WiFi.SSID().c_str());
       snprintf(devRow, sizeof(devRow), "Dev: %s", cast.getFriendlyName());
       snprintf(appRow, sizeof(appRow), "App: %s", cast.getAppName());
-      snprintf(verRow, sizeof(verRow), "Ver: 1.3.0");
+      snprintf(verRow, sizeof(verRow), "Ver: 1.3.1");
 
       const char *rows[] = {ipRow, ssidRow, devRow, appRow, verRow};
       menu.showInfo(rows, 5);
@@ -302,7 +302,7 @@ static void handleMenuInput() {
       display.showOverlay("Disconnected");
       menu.open(false, cast.deviceCount > 0);
     } else if (strcmp(sel, "About") == 0) {
-      const char *rows[] = {"KnobCast", "Firmware v1.3.0",
+      const char *rows[] = {"KnobCast", "Firmware v1.3.1",
                             "by Erico Mendonca",
                             "github.com/doccaz/knobcast"
                             "Built: " __DATE__,
@@ -483,7 +483,7 @@ static void handleMenuInput() {
       snprintf(ssidRow, sizeof(ssidRow), "SSID: %s", WiFi.SSID().c_str());
       snprintf(devRow, sizeof(devRow), "Dev: %s", cast.getFriendlyName());
       snprintf(appRow, sizeof(appRow), "App: %s", cast.getAppName());
-      snprintf(verRow, sizeof(verRow), "Ver: 1.3.0");
+      snprintf(verRow, sizeof(verRow), "Ver: 1.3.1");
       const char *rows[] = {ipRow, ssidRow, devRow, appRow, verRow};
       menu.showInfo(rows, 5);
     } else if (strcmp(sel, "<- back") == 0) {

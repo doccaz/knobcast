@@ -190,7 +190,7 @@ Runs on port 80 in both AP and STA modes.
 |---|---|---|
 | `/` | GET | Main HTML page (config + control + status) |
 | `/save` | POST | Save WiFi/Cast config → reboot |
-| `/status` | GET | JSON: volume, muted, playing, app, device, time, config |
+| `/status` | GET | JSON: volume, muted, playing, app, device, time, WiFi RSSI, config |
 | `/control` | POST | Commands: play, pause, stop, next, prev, mute, unmute, volup, voldown, setvol:N, seek:N, disconnect |
 | `/scan` | GET | mDNS scan → JSON list of discovered Chromecasts |
 | `/connectcast` | POST | Connect to a specific device by IP and port |
